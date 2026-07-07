@@ -19,9 +19,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="마이크 음성을 녹음해 Whisper로 인식하고 진료 차팅 텍스트로 출력합니다."
     )
     parser.add_argument(
+        "--backend",
+        choices=["api", "local"],
+        default="api",
+        help="음성인식 방식: api(OpenAI Whisper API, 기본값) 또는 local(오프라인 faster-whisper)",
+    )
+    parser.add_argument(
         "--stt-model",
         default="whisper-1",
-        help="OpenAI 음성인식 모델 (예: whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe)",
+        help="[--backend api] OpenAI 음성인식 모델 (예: whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe)",
+    )
+    parser.add_argument(
+        "--local-model-size",
+        default="medium",
+        help="[--backend local] faster-whisper 모델 크기 (tiny/base/small/medium/large-v3 등, 기본 medium)",
+    )
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        help="[--backend local] 실행 장치 (cpu 또는 cuda, 기본 cpu)",
+    )
+    parser.add_argument(
+        "--compute-type",
+        default="int8",
+        help="[--backend local] 연산 정밀도 (cpu는 int8 권장, cuda는 float16 권장)",
     )
     parser.add_argument("--language", default="ko", help="인식 언어 코드 (기본값: ko)")
     parser.add_argument(
@@ -59,10 +80,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    needs_api_key = args.backend == "api" or args.soap
+    if needs_api_key and not api_key:
         print(
             "OPENAI_API_KEY가 설정되어 있지 않습니다. .env 파일을 만들거나 "
-            "환경변수로 지정하세요. (ChatGPT Plus 구독과 API 키는 별개입니다)",
+            "환경변수로 지정하세요. (ChatGPT Plus 구독과 API 키는 별개입니다)\n"
+            "API 키 없이 쓰려면 --backend local --soap 없이 실행하세요.",
             file=sys.stderr,
         )
         return 1
@@ -84,7 +107,24 @@ def main(argv: list[str] | None = None) -> int:
     audio_path = audio_dir / f"chart_{timestamp}.wav"
     recorder.save_wav(audio, str(audio_path))
 
-    transcriber = WhisperTranscriber(api_key=api_key, model=args.stt_model)
+    if args.backend == "local":
+        try:
+            from .local_transcriber import LocalWhisperTranscriber
+        except ImportError:
+            print(
+                "로컬 백엔드를 쓰려면 faster-whisper가 필요합니다: "
+                "pip install -r requirements-local.txt",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"로컬 Whisper 모델을 불러오는 중... ({args.local_model_size}, {args.device})")
+        transcriber = LocalWhisperTranscriber(
+            model_size=args.local_model_size,
+            device=args.device,
+            compute_type=args.compute_type,
+        )
+    else:
+        transcriber = WhisperTranscriber(api_key=api_key, model=args.stt_model)
     print("음성 인식 중...")
     transcript = transcriber.transcribe(audio_path, language=args.language, prompt=args.prompt)
 

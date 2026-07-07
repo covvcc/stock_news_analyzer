@@ -53,20 +53,45 @@ Whisper는 `--prompt`로 준 텍스트를 힌트로 사용해 비슷한 발음�
 
 | 옵션 | 설명 |
 | --- | --- |
-| `--stt-model` | 음성인식 모델 (기본 `whisper-1`, `gpt-4o-transcribe`/`gpt-4o-mini-transcribe`로 변경 가능) |
+| `--backend` | `api`(OpenAI Whisper API, 기본값) 또는 `local`(오프라인 faster-whisper) |
+| `--stt-model` | [`api`] 음성인식 모델 (기본 `whisper-1`, `gpt-4o-transcribe`/`gpt-4o-mini-transcribe`로 변경 가능) |
+| `--local-model-size` | [`local`] faster-whisper 모델 크기 (`tiny`/`base`/`small`/`medium`/`large-v3`, 기본 `medium`) |
+| `--device` | [`local`] 실행 장치 (`cpu` 기본, GPU 있으면 `cuda`) |
+| `--compute-type` | [`local`] 연산 정밀도 (`cpu`는 `int8` 권장, `cuda`는 `float16` 권장) |
 | `--language` | 인식 언어 코드 (기본 `ko`) |
 | `--prompt` | 인식 힌트로 줄 텍스트 |
-| `--soap` | 차팅용 SOAP 형식으로 정리 |
+| `--soap` | 차팅용 SOAP 형식으로 정리 (이 옵션은 `--backend local`이어도 OpenAI API 호출 발생) |
 | `--chat-model` | `--soap` 정리에 쓸 채팅 모델 (기본 `gpt-4o-mini`) |
 | `--output` | 결과를 저장할 파일 경로 |
 | `--keep-audio` | 녹음 파일(wav)을 삭제하지 않고 `recordings/`에 보관 |
 
+## 로컬 Whisper로 실행하기 (API 키 불필요, 오프라인)
+
+`faster-whisper`(CTranslate2 기반)를 백엔드로 지원합니다. 인터넷 없이, 건당 API 비용 없이,
+음성 데이터를 외부로 전송하지 않고 로컬에서만 인식합니다.
+
+```bash
+pip install -r requirements-local.txt
+python main.py --backend local --local-model-size medium
+```
+
+- 모델은 최초 실행 시 한 번 다운로드되어 캐시되고(`~/.cache/huggingface`), 이후에는 완전히 오프라인으로 동작합니다.
+- `--soap`을 함께 쓰면 그 단계만 OpenAI API를 호출하므로 그때는 `OPENAI_API_KEY`가 필요합니다.
+- GPU(NVIDIA + CUDA/cuDNN)가 있으면 `--device cuda --compute-type float16`으로 속도를 크게 높일 수 있습니다.
+
+모델 크기별 대략적인 트레이드오프 (한국어 기준):
+
+| 모델 | 속도 | 정확도 | 비고 |
+| --- | --- | --- | --- |
+| `tiny` / `base` | 매우 빠름 | 낮음 | 빠른 테스트용, 의료 차팅에는 부적합 |
+| `small` | 빠름 | 보통 | CPU에서도 실용적 |
+| `medium` | 보통 (기본값) | 좋음 | 정확도/속도 균형, CPU에서도 사용 가능하지만 다소 느림 |
+| `large-v3` | 느림(CPU) / 보통(GPU) | 가장 좋음 | 전문용어가 많으면 권장, GPU 없으면 체감 지연이 큼 |
+
 ## 한국어 인식이 더 필요할 때 고려할 대안
 
-의료 전문용어가 많은 환경에서 Whisper API만으로 부족하다면:
+의료 전문용어가 많은 환경에서 Whisper(API/로컬)만으로 부족하다면:
 
-- **로컬 Whisper (`faster-whisper`, `whisper.cpp`, large-v3 모델)**: API 비용 없이 오프라인으로
-  실행 가능해 환자 정보를 외부로 보내지 않아도 됩니다. GPU가 있으면 속도도 준수합니다.
 - **네이버 클로바 스피치 / Return Zero 등 한국어 특화 STT**: 커스텀 사전(단어 부스팅) 기능으로
   의료 용어 인식률을 높일 수 있으나 별도 API 신청·계약·요금 확인이 필요합니다.
 - **Google Cloud Speech-to-Text**: 한국어 인식 품질이 좋고 커스텀 어휘(word boosting)를
